@@ -5,8 +5,6 @@ python-dateutil
 supabase
 httpx
 openai
-mem0ai
-pinecone
 imageio-ffmpeg
 google-auth
 google-auth-httplib2
