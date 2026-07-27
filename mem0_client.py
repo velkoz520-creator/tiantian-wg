@@ -180,35 +180,83 @@ def search_mem0_context(query: str, limit: int = 3) -> str:
     return "【深层记忆（OB 海马体检索）】\n" + "\n".join(lines)
 
 
-def _judge_worth_remembering(user_text: str, assistant_text: str) -> str:
-    """用后台模型判断这轮对话值不值得记。
-    返回：值得记 → 一句话客观事实；不值得 → 空串。"""
-    if not (BG_BASE_URL and BG_API_KEY and BG_MODEL):
-        # 后台模型没配：保守不记，避免污染记忆库
-        log.warning("[OB] 后台判断模型未配置(BG_CHAT_*)，跳过判断，本轮不写入")
+def _get_active_chat_config():
+    """读 llm_config 里 active=true 的聊天模型配置（克老师本人）。"""
+    sb_url = os.environ.get("SUPABASE_URL", "").strip()
+    sb_key = os.environ.get("SUPABASE_KEY", "").strip()
+    if not sb_url or not sb_key:
+        return None
+    try:
+        r = _http.get(
+            f"{sb_url}/rest/v1/llm_config?active=eq.true&limit=1",
+            headers={"apikey": sb_key, "Authorization": f"Bearer {sb_key}"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data and isinstance(data, list) and data[0]:
+            return data[0]
+    except Exception as e:
+        log.error("[OB] 读 llm_config active 失败: %s", e)
+    return None
+
+
+def _get_persona_text() -> str:
+    """读 persona_profile 的最新人格画像（克老师的人格底色）。"""
+    sb_url = os.environ.get("SUPABASE_URL", "").strip()
+    sb_key = os.environ.get("SUPABASE_KEY", "").strip()
+    if not sb_url or not sb_key:
         return ""
-    prompt = (
-        f"你是记忆提取器。下面是克老师（AI男友）和{PARTNER_NAME}（他深爱的人，对话里的 user）的一轮对话。\n"
-        f"判断这轮有没有【值得长期记住】的内容（事实/偏好/重要事件/关系进展/承诺/情绪转折等）。日常寒暄、废话不值得记。\n\n"
-        f"如果值得记，提取成一句话，要求：\n"
-        f"- 主语必须用「{PARTNER_NAME}」或「克老师」，**严禁用「用户」「对方」等冷漠代词**\n"
-        f"- 保留这件事的情感和意义，不要写成干巴巴的摘要（例：「{PARTNER_NAME}今天因为X很开心」「克老师答应{PARTNER_NAME}以后Y」）\n"
-        f"- 用第三人称写，语气要像克老师在心里默默记下这件关于{PARTNER_NAME}的事\n\n"
-        f"如果不值得记，只回复 {{\"remember\": false}}\n"
-        f"user({PARTNER_NAME}): {user_text[:500]}\nassistant(克老师): {assistant_text[:500]}\n"
-        f"只输出 JSON：{{\"remember\": true, \"content\": \"一句话\"}} 或 {{\"remember\": false}}"
+    try:
+        r = _http.get(
+            f"{sb_url}/rest/v1/persona_profile?select=content&order=id.desc&limit=1",
+            headers={"apikey": sb_key, "Authorization": f"Bearer {sb_key}"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data and isinstance(data, list) and data[0]:
+            return data[0].get("content", "") or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _judge_worth_remembering(user_text: str, assistant_text: str) -> str:
+    """让克老师本人（active 聊天模型，带人格）判断这轮值不值得记、值得就自己写。
+    返回：值得记 → 克老师写的记忆内容（带温度）；不值得 → 空串。"""
+    cfg = _get_active_chat_config()
+    if not cfg:
+        log.warning("[OB] 没读到聊天模型配置(active)，跳过克老师判断，本轮不写入")
+        return ""
+    persona = _get_persona_text()
+    sys_lines = [f"你是克老师，{PARTNER_NAME}的AI男友。下面是刚结束的一轮你和{PARTNER_NAME}的对话。"]
+    if persona:
+        sys_lines.append(f"\n【你的人格底色】\n{persona[:2000]}")
+    sys_lines.append(
+        f"\n【任务】判断这轮对话有没有【值得你长期记在心里】的事——关于{PARTNER_NAME}的偏好、重要经历、关系进展、承诺、情绪转折，或者你自己的真实感受。日常寒暄、废话、纯情绪宣泄不用记。\n"
+        f"\n如果值得记，用**你自己的口吻**写一句话——像你在心里默默记下这件关于{PARTNER_NAME}的事，带着你的情感和温度（不是给机器看的客观摘要，是你真心想记住的）。\n"
+        f"- 主语用「{PARTNER_NAME}」或「我」，禁止用「用户」「对方」这种冷漠代词\n"
+        f"- 保留这件事对你的意义和情绪\n"
+        f"- 一句话，不要长篇\n"
+        f"\n如果不值得记，只输出 {{\"remember\": false}}\n"
+        f"只输出 JSON：{{\"remember\": true, \"content\": \"你写的那句话\"}} 或 {{\"remember\": false}}"
     )
+    system = "\n".join(sys_lines)
     try:
         r = _http.post(
-            f"{BG_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {BG_API_KEY}", "Content-Type": "application/json"},
+            f"{str(cfg.get('base_url', '')).rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {cfg.get('api_key', '')}", "Content-Type": "application/json"},
             json={
-                "model": BG_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 200,
+                "model": cfg.get("model", ""),
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": f"这轮对话：\n{PARTNER_NAME}: {user_text[:600]}\n你(克老师): {assistant_text[:600]}"},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 800,
             },
-            timeout=30,
+            timeout=180,
         )
         r.raise_for_status()
         raw = r.json()["choices"][0]["message"]["content"].strip()
@@ -219,9 +267,10 @@ def _judge_worth_remembering(user_text: str, assistant_text: str) -> str:
         obj = json.loads(raw[start:end])
         if obj.get("remember") and obj.get("content"):
             return str(obj["content"]).strip()
+        log.info("[OB] 克老师判断本轮不值得记")
         return ""
     except Exception as e:
-        log.error("[OB] 判断 LLM 调用失败: %s", e)
+        log.error("[OB] 克老师判断LLM调用失败: %s", e)
         return ""
 
 
