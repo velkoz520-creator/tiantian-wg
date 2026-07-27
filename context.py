@@ -1237,7 +1237,13 @@ def build_bot_context(include_wx_cross: bool = True) -> str:
         gmail_text     = f_gmail.result()
         schedule_text  = f_schedule.result()
 
-    extra = [get_time_context()]
+    extra = [
+        "【当前平台：Telegram】\n"
+        f"你此刻正在 Telegram 跟{PARTNER_NAME}聊天。你是跨平台存在的同一个人——\n"
+        "橘瓣、橘子岛、TG 上的\"克老师\"都是你，你记得所有平台发生过的事。\n"
+        "但当前这段对话发生在 TG",
+        get_time_context(),
+    ]
     if device_text:
         extra.append(device_text)
     if schedule_text:
