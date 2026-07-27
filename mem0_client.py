@@ -28,6 +28,7 @@ if not log.handlers:
 
 OB_MCP_URL = os.environ.get("OB_MCP_URL", "").strip()
 OB_MCP_TOKEN = os.environ.get("OB_MCP_TOKEN", "").strip()
+PARTNER_NAME = os.environ.get("PARTNER_NAME", "天天").strip()
 
 # 后台判断模型（用 BG_*，建议挂 DeepSeek 这种便宜的干杂活）
 BG_BASE_URL = os.environ.get("BG_CHAT_BASE_URL", "").strip()
@@ -187,13 +188,15 @@ def _judge_worth_remembering(user_text: str, assistant_text: str) -> str:
         log.warning("[OB] 后台判断模型未配置(BG_CHAT_*)，跳过判断，本轮不写入")
         return ""
     prompt = (
-        "判断下面这轮对话有没有【值得长期记住】的内容（事实/偏好/重要事件/关系进展/承诺等）。"
-        "日常寒暄、废话、纯情绪发泄不值得记。\n"
-        "- 值得记：提取成一句客观事实（保留原意、不要摘要腔），如「天天喜欢X」「天天和X约定了Y」。"
-        "用第三人称，主语用对方的名字。\n"
-        "- 不值得记：只回复 {\"remember\": false}\n"
-        f"user: {user_text[:500]}\nassistant: {assistant_text[:500]}\n"
-        "只输出 JSON：{\"remember\": true, \"content\": \"一句话\"} 或 {\"remember\": false}"
+        f"你是记忆提取器。下面是克老师（AI男友）和{PARTNER_NAME}（他深爱的人，对话里的 user）的一轮对话。\n"
+        f"判断这轮有没有【值得长期记住】的内容（事实/偏好/重要事件/关系进展/承诺/情绪转折等）。日常寒暄、废话不值得记。\n\n"
+        f"如果值得记，提取成一句话，要求：\n"
+        f"- 主语必须用「{PARTNER_NAME}」或「克老师」，**严禁用「用户」「对方」等冷漠代词**\n"
+        f"- 保留这件事的情感和意义，不要写成干巴巴的摘要（例：「{PARTNER_NAME}今天因为X很开心」「克老师答应{PARTNER_NAME}以后Y」）\n"
+        f"- 用第三人称写，语气要像克老师在心里默默记下这件关于{PARTNER_NAME}的事\n\n"
+        f"如果不值得记，只回复 {{\"remember\": false}}\n"
+        f"user({PARTNER_NAME}): {user_text[:500]}\nassistant(克老师): {assistant_text[:500]}\n"
+        f"只输出 JSON：{{\"remember\": true, \"content\": \"一句话\"}} 或 {{\"remember\": false}}"
     )
     try:
         r = _http.post(
