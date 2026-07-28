@@ -35,7 +35,7 @@ from utils import get_active_llm_config
 from context import build_rikkahub_context, save_chat_message, save_rikkahub_message
 from mem0_client import write_mem0_chat
 from bg_executor import submit_background, track_task
-from prompts import AI_NAME, PARTNER_NAME
+from prompts import AI_NAME, PARTNER_NAME, RIKKAHUB_PLATFORM_AWARENESS
  
 # 以下几条 DeprecationWarning 都来自第三方库内部实现（supabase-py 创建 httpx
 # client 时用了旧参数、uvicorn 还在用旧版 websockets API），不是本项目代码
@@ -352,6 +352,8 @@ class RikkahubGatewayMiddleware:
                     last_msg_role = original_messages[-1].get("role", "") if original_messages else ""
  
                     system_prompt = await asyncio.to_thread(build_rikkahub_context)
+                    # v2 第一批第1条：橘瓣端平台与能力感知（仅橘瓣，TG 走 build_bot_context 不经过这里）
+                    system_prompt = RIKKAHUB_PLATFORM_AWARENESS + "\n\n" + system_prompt
  
                     if original_messages and original_messages[0].get("role") == "system":
                         original_messages[0]["content"] = system_prompt
