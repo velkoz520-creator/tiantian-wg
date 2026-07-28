@@ -33,7 +33,7 @@ logging.basicConfig(
  
 from utils import get_active_llm_config
 from context import build_rikkahub_context, save_chat_message, save_rikkahub_message
-from mem0_client import write_mem0_chat
+from mem0_client import write_mem0_chat, search_mem0_context
 from bg_executor import submit_background, track_task
 from prompts import AI_NAME, PARTNER_NAME, RIKKAHUB_PLATFORM_AWARENESS
  
@@ -354,6 +354,14 @@ class RikkahubGatewayMiddleware:
                     system_prompt = await asyncio.to_thread(build_rikkahub_context)
                     # v2 第一批第1条：橘瓣端平台与能力感知（仅橘瓣，TG 走 build_bot_context 不经过这里）
                     system_prompt = RIKKAHUB_PLATFORM_AWARENESS + "\n\n" + system_prompt
+
+                    # v2 痛点A修复：橘瓣端 OB 记忆检索（之前橘瓣只写不读，跨平台断片）
+                    # 照抄 TG 端 workers.py:335 的写法，用最后一条 user 消息当 query 调 OB breath_search。
+                    # 这样橘瓣克老师能读到 TG/其他端写进 OB 的记忆，实现跨平台记忆连续。
+                    if user_text:
+                        mem0_ctx = await asyncio.to_thread(search_mem0_context, user_text, 3)
+                        if mem0_ctx:
+                            system_prompt += "\n\n" + mem0_ctx
  
                     if original_messages and original_messages[0].get("role") == "system":
                         original_messages[0]["content"] = system_prompt
