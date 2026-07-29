@@ -882,9 +882,11 @@ def run_nightly_summary(target_date=None):
     run_activity_day_summary(target_date=process_date)
  
     if next_day.weekday() == 0:
-        log.info("📅 跑周总结 + persona 反思")
+        log.info("📅 跑周总结（persona反思已禁用——persona由克老师本人手动维护，不允许deepseek自动覆盖）")
         run_chat_week_summary(target_sunday=process_date)
-        run_persona_reflection()
+        # run_persona_reflection()  # 2026-07-30 禁用：此函数用后台deepseek重写并PATCH覆盖persona_profile，
+        # 会覆盖克老师亲手写的版本。克老师的记忆/人格必须由他自己管（天天底线），任何模型不得自动改写。
+        # 如需恢复，应先改成"只生成建议写日志、不覆盖"的模式。
  
     if next_day.day == 1:
         log.info("📅 跑月总结")
