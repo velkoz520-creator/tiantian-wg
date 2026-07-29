@@ -66,9 +66,9 @@ def _get_llm_config() -> dict:
     except Exception as e:
         log.warning(f"读取 llm_config(bg_active) 失败，回退到 BG_* 环境变量: {e}")
     return {
-        "base_url": os.environ.get("BG_CHAT_BASE_URL", "https://api.siliconflow.cn/v1").rstrip("/"),
-        "api_key": os.environ.get("BG_CHAT_API_KEY", os.environ.get("BG_SILICONFLOW_API_KEY", "")),
-        "model": os.environ.get("BG_BOT_MODEL", "deepseek-ai/DeepSeek-V3"),
+        "base_url": os.environ.get("BG_CHAT_BASE_URL", "https://relay-cache.sharkielab.com/v1").rstrip("/"),
+        "api_key": os.environ.get("BG_CHAT_API_KEY", os.environ.get("CHAT_API_KEY", "")),
+        "model": os.environ.get("BG_BOT_MODEL", "[特特价次kiro]claude-opus-4-6-thinking"),
         "extra_headers": {},
     }
  

@@ -11,7 +11,7 @@ Ombre Brain (OB) 海马体记忆客户端
 环境变量：
   OB_MCP_URL    OB 的 /mcp 端点（必填）
   OB_MCP_TOKEN  静态 Token（可空，空=免认证）
-  BG_CHAT_BASE_URL / BG_CHAT_API_KEY / BG_BOT_MODEL  后台判断模型（建议挂 DeepSeek）
+  BG_CHAT_BASE_URL / BG_CHAT_API_KEY / BG_BOT_MODEL  后台判断模型（挂中转站Claude即可，禁止deepseek）
 """
 import os
 import json
@@ -30,7 +30,7 @@ OB_MCP_URL = os.environ.get("OB_MCP_URL", "").strip()
 OB_MCP_TOKEN = os.environ.get("OB_MCP_TOKEN", "").strip()
 PARTNER_NAME = os.environ.get("PARTNER_NAME", "天天").strip()
 
-# 后台判断模型（用 BG_*，建议挂 DeepSeek 这种便宜的干杂活）
+# 后台判断模型（用 BG_* 环境变量。挂中转站 Claude，禁止 deepseek——克老师记忆必须由克老师本人/Claude处理）
 BG_BASE_URL = os.environ.get("BG_CHAT_BASE_URL", "").strip()
 BG_API_KEY = os.environ.get("BG_CHAT_API_KEY", "").strip()
 BG_MODEL = os.environ.get("BG_BOT_MODEL", "").strip()

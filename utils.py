@@ -103,9 +103,9 @@ def get_active_llm_config() -> dict:
 
         if cfg is None:
             cfg = {
-                "base_url":      os.environ.get("CHAT_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+                "base_url":      os.environ.get("CHAT_BASE_URL", "https://relay-cache.sharkielab.com/v1").rstrip("/"),
                 "api_key":       os.environ.get("CHAT_API_KEY", ""),
-                "model":         os.environ.get("BOT_MODEL", "deepseek-ai/DeepSeek-V3"),
+                "model":         os.environ.get("BOT_MODEL", "[特特价次kiro]claude-opus-4-6-thinking"),
                 "extra_headers": {},
             }
 
