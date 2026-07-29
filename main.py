@@ -410,9 +410,28 @@ class RikkahubGatewayMiddleware:
                                 if resp.status_code >= 400:
                                     err_body = await resp.aread()
                                     body_text = err_body.decode("utf-8", errors="ignore")[:300]
+                                    # 诊断：400时打出请求的关键结构，定位是模型/图片/格式哪个出问题
+                                    _diag_msgs = req_data.get("messages", [])
+                                    _diag_has_image = any(
+                                        isinstance(m.get("content"), list) and
+                                        any(isinstance(p, dict) and p.get("type") == "image_url" for p in m["content"])
+                                        for m in _diag_msgs
+                                    )
+                                    _diag_msg_roles = [m.get("role") for m in _diag_msgs]
+                                    _diag_model = req_data.get("model", "(空)")
+                                    _diag_msg_count = len(_diag_msgs)
+                                    # 如果有图片，统计图片大小（不打base64全文，只打长度）
+                                    _diag_img_info = ""
+                                    for m in _diag_msgs:
+                                        if isinstance(m.get("content"), list):
+                                            for p in m["content"]:
+                                                if isinstance(p, dict) and p.get("type") == "image_url":
+                                                    url = p.get("image_url", {}).get("url", "")
+                                                    _diag_img_info = f"图片url长度={len(url)} 前缀={url[:30]}"
                                     log.error(
-                                        "[Gateway] 上游接口返回错误 status=%s target_url=%s body=%s",
-                                        resp.status_code, target_url, body_text,
+                                        "[Gateway] 上游错误 status=%s model=%s | 诊断: msg数=%s roles=%s 含图片=%s %s | 上游body=%s",
+                                        resp.status_code, _diag_model, _diag_msg_count, _diag_msg_roles,
+                                        _diag_has_image, _diag_img_info, body_text,
                                     )
                                     err_msg = "请求过于频繁，请稍后重试 (429)" if resp.status_code == 429 else f"上游服务错误 ({resp.status_code})"
                                     err_chunk = json.dumps({
