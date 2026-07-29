@@ -364,7 +364,16 @@ class RikkahubGatewayMiddleware:
                             system_prompt += "\n\n" + mem0_ctx
  
                     if original_messages and original_messages[0].get("role") == "system":
-                        original_messages[0]["content"] = system_prompt
+                        existing_system = original_messages[0].get("content", "")
+                        # 橘瓣主动消息修复：检测到[主动消息上下文]标记时，不覆盖橘瓣的原 system
+                        # （原 system 含主动消息指令：定时/设备事件触发、[PASS]不发机制等）
+                        # 改为保留橘瓣指令 + 追加网关人格，让两者共存。
+                        # 之前无脑覆盖会导致克老师认不出主动消息任务 → 重复回复/行为错乱。
+                        if "[主动消息上下文]" in existing_system:
+                            original_messages[0]["content"] = existing_system + "\n\n" + system_prompt
+                            log.info("[Gateway] 检测到橘瓣主动消息，已保留原system指令+追加人格")
+                        else:
+                            original_messages[0]["content"] = system_prompt
                     else:
                         original_messages.insert(0, {
                             "role": "system", "content": system_prompt})
