@@ -190,15 +190,20 @@ def _sb_get(table: str, params: str) -> list:
  
  
 def _sb_insert(table: str, data: dict):
-    try:
-        res = requests.post(
-            f"{SUPABASE_URL}/rest/v1/{table}",
-            headers=_SB_HEADERS, json=data, timeout=10,
-        )
-        if not res.ok:
-            log.error(f"[sb_insert] {table} 写入失败 HTTP {res.status_code}: {res.text[:200]}")
-    except Exception as e:
-        log.error(f"[sb_insert] {table} 异常: {e}")
+    """写入失败抛 RuntimeError，不再静默吞掉。
+
+    历史教训：原实现失败时只 log.error 不抛异常，导致调用方无从感知，
+    继续执行后续的 _sb_delete 把源数据删掉 → 摘要没写成 + 原文也没了 = 永久丢失。
+    改成抛异常后，调用方必须自己决定如何处理（涉及删源的调用应用 try/except
+    包住 insert，失败则 return 保留源数据等待下次重试；无删源的调用靠外层
+    try 兜底即可，异常会被吞掉不会崩进程）。
+    """
+    res = requests.post(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        headers=_SB_HEADERS, json=data, timeout=10,
+    )
+    if not res.ok:
+        raise RuntimeError(f"{table} 写入失败 HTTP {res.status_code}: {res.text[:200]}")
  
  
 def _sb_delete(table: str, ids: list, batch_size: int = 200):
@@ -263,10 +268,14 @@ def run_chat_day_summary(target_date=None):
         log.error("[chat-day] LLM 全部失败，本次跳过，数据保留")
         return
  
-    _sb_insert("chat_summaries", {
-        "period": "day", "content": summary,
-        "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
-    })
+    try:
+        _sb_insert("chat_summaries", {
+            "period": "day", "content": summary,
+            "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
+        })
+    except Exception as e:
+        log.error(f"[chat-day] 摘要写入失败，保留原始记录等待重试: {e}")
+        return
     _sb_delete("chat_context", [r["id"] for r in records])
     log.info(f"[chat-day] 完成，{len(records)} 条对话 → 1 条日总结")
  
@@ -303,10 +312,14 @@ def run_chat_week_summary(target_sunday=None):
     if not summary:
         raise RuntimeError("[chat-week] LLM 全部失败，数据保留，等待下次重试")
  
-    _sb_insert("chat_summaries", {
-        "period": "week", "content": summary,
-        "period_start": last_monday.isoformat(), "period_end": last_sunday.isoformat(),
-    })
+    try:
+        _sb_insert("chat_summaries", {
+            "period": "week", "content": summary,
+            "period_start": last_monday.isoformat(), "period_end": last_sunday.isoformat(),
+        })
+    except Exception as e:
+        log.error(f"[chat-week] 摘要写入失败，保留原始记录等待重试: {e}")
+        return
     _sb_delete("chat_summaries", [r["id"] for r in records])
     log.info(f"[chat-week] 完成 {last_monday.date()} ~ {last_sunday.date()}")
  
@@ -339,10 +352,14 @@ def run_chat_month_summary(target_month_end=None):
     if not summary:
         raise RuntimeError("[chat-month] LLM 全部失败，数据保留，等待下次重试")
  
-    _sb_insert("chat_summaries", {
-        "period": "month", "content": summary,
-        "period_start": last_start.isoformat(), "period_end": last_end.isoformat(),
-    })
+    try:
+        _sb_insert("chat_summaries", {
+            "period": "month", "content": summary,
+            "period_start": last_start.isoformat(), "period_end": last_end.isoformat(),
+        })
+    except Exception as e:
+        log.error(f"[chat-month] 摘要写入失败，保留原始记录等待重试: {e}")
+        return
     _sb_delete("chat_summaries", [r["id"] for r in records])
     log.info(f"[chat-month] 完成 {last_start.date().strftime('%Y-%m')}")
  
@@ -376,10 +393,14 @@ def run_chat_year_summary(target_year_end=None):
     if not summary:
         raise RuntimeError("[chat-year] LLM 全部失败，数据保留，等待下次重试")
  
-    _sb_insert("chat_summaries", {
-        "period": "year", "content": summary,
-        "period_start": ly_start.isoformat(), "period_end": ly_end.isoformat(),
-    })
+    try:
+        _sb_insert("chat_summaries", {
+            "period": "year", "content": summary,
+            "period_start": ly_start.isoformat(), "period_end": ly_end.isoformat(),
+        })
+    except Exception as e:
+        log.error(f"[chat-year] 摘要写入失败，保留原始记录等待重试: {e}")
+        return
     _sb_delete("chat_summaries", [r["id"] for r in records])
     log.info(f"[chat-year] 完成")
  
@@ -489,10 +510,14 @@ def run_activity_day_summary(target_date=None):
         log.error("[activity-day] LLM 全部失败，本次跳过，数据保留")
         return
  
-    _sb_insert("activity_summaries", {
-        "period": "day", "content": summary,
-        "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
-    })
+    try:
+        _sb_insert("activity_summaries", {
+            "period": "day", "content": summary,
+            "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
+        })
+    except Exception as e:
+        log.error(f"[activity-day] 摘要写入失败，保留原始记录等待重试: {e}")
+        return
     _sb_delete("activity_log", [r["id"] for r in records])
     log.info(f"[activity-day] 完成，{len(records)} 条活动日志 → 1 条日总结")
  
@@ -646,13 +671,17 @@ def run_platform_batch_compress():
                 platforms.add("群聊")
         source_platforms = "、".join(sorted(platforms))
  
-        _sb_insert("platform_rolling_summary", {
-            "content": summary,
-            "source_platforms": source_platforms,
-            "period_start": period_start_dt.isoformat(),
-            "period_end": period_end_dt.isoformat(),
-        })
- 
+        try:
+            _sb_insert("platform_rolling_summary", {
+                "content": summary,
+                "source_platforms": source_platforms,
+                "period_start": period_start_dt.isoformat(),
+                "period_end": period_end_dt.isoformat(),
+            })
+        except Exception as e:
+            log.error(f"[platform-batch-compress] 摘要写入失败，保留原始记录等待重试: {e}")
+            return
+
         ids = [r["id"] for r in rows]
         _sb_delete("chat_context", ids)
  
@@ -857,12 +886,16 @@ def run_platform_summary_maintenance():
  
         old_ids = [r["id"] for r in rows]
  
-        _sb_insert("platform_rolling_summary", {
-            "content": merged_summary,
-            "source_platforms": source_platforms,
-            "period_start": earliest_start,
-            "period_end": latest_end,
-        })
+        try:
+            _sb_insert("platform_rolling_summary", {
+                "content": merged_summary,
+                "source_platforms": source_platforms,
+                "period_start": earliest_start,
+                "period_end": latest_end,
+            })
+        except Exception as e:
+            log.error(f"[platform-summary-maintenance] 合并摘要写入失败，保留旧记录等待重试: {e}")
+            return
         _sb_delete("platform_rolling_summary", old_ids)
  
         log.info(f"[platform-summary-maintenance] 完成，{len(rows)} 条滚动摘要 → 合并为 1 条")
