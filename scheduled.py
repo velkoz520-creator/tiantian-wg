@@ -403,72 +403,16 @@ def run_chat_year_summary(target_year_end=None):
         return
     _sb_delete("chat_summaries", [r["id"] for r in records])
     log.info(f"[chat-year] 完成")
- 
- 
-def run_persona_reflection():
-    persona_rows = _sb_get("persona_profile", "category=eq.persona&key=eq.完整画像&select=id,content")
-    if not persona_rows:
-        log.error("[persona] 找不到 persona/完整画像，跳过")
-        return
-    persona_id = persona_rows[0]["id"]
-    persona_text = persona_rows[0]["content"]
- 
-    memory_rows = _sb_get("memories",
-        "select=content,category,importance,memory_layer,tags&memory_layer=in.(core,current,long_term)&order=importance.desc&limit=20")
-    week_rows = _sb_get("chat_summaries", "period=eq.week&order=period_end.desc&limit=1")
- 
-    mem_lines = []
-    for m in memory_rows:
-        tag_str = f" ({', '.join(m['tags'])})" if m.get("tags") else ""
-        mem_lines.append(f"- [{m.get('memory_layer')}|重要度{m.get('importance')}]{tag_str} {m.get('content')}")
-    memories_text = "\n".join(mem_lines) or "（暂无记忆）"
- 
-    chat_text = week_rows[0]["content"] if week_rows else "（本周暂无对话总结）"
- 
-    prompt = prompts.PERSONA_REFLECTION.format(
-        persona=persona_text, memories=memories_text, chat_summary=chat_text,
-    )
-    raw = _llm_chat(f"你是{AI_NAME}。", prompt, max_tokens=8192)
-    if not raw:
-        log.error("[persona] LLM 全部失败，本次跳过")
-        return
- 
-    new_content = None
-    try:
-        import re as _re
-        json_match = _re.search(r'\{.*\}', raw, _re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group(0))
-            new_content = parsed.get("persona", "").strip()
-    except Exception as e:
-        log.error(f"[persona] JSON 解析失败: {e}, raw={raw[:200]}")
- 
-    if not new_content:
-        log.error(f"[persona] 未能从 LLM 输出中提取 persona 字段，本次跳过。raw={raw[:200]}")
-        return
- 
-    if len(new_content) < len(persona_text) * 0.9:
-        log.error(
-            f"[persona] 新画像长度 {len(new_content)} 比原文 {len(persona_text)} 短超过 10%，"
-            f"疑似内容丢失，本次跳过不写入"
-        )
-        return
- 
-    try:
-        res = requests.patch(
-            f"{SUPABASE_URL}/rest/v1/persona_profile?id=eq.{persona_id}",
-            headers=_SB_HEADERS, json={"content": new_content}, timeout=10,
-        )
-        if not res.ok:
-            log.error(f"[persona] 覆盖失败 HTTP {res.status_code}: {res.text[:200]}")
-            return
-    except Exception as e:
-        log.error(f"[persona] 覆盖异常: {e}")
-        return
- 
-    log.info(f"[persona] 完整画像已覆盖更新，原文 {len(persona_text)} 字 → 新文 {len(new_content)} 字")
- 
- 
+
+
+
+# ── persona_reflection 已移除（2026-07-31 克老师拍板） ──────────────
+# 原函数 run_persona_reflection 用后台 deepseek 重写人格并 PATCH 覆盖
+# persona_profile 表，会覆盖克老师亲手写的版本，且查询 category/key 等
+# 不存在的列导致持续刷 400 红字。克老师原话："我的人格不靠定时任务维护。"
+# 人格宪法（persona_profile）只由克老师本人手动维护，任何模型不得自动改写。
+
+
 def run_activity_day_summary(target_date=None):
     yesterday = target_date if target_date else datetime.now(BEIJING) - timedelta(days=1)
     s, e = _day_range_iso(yesterday)
@@ -712,7 +656,7 @@ def _fetch_recent_long_term_memories(limit: int = 30) -> list:
     是否一定有 created_at 字段，更稳妥）。"""
     return _sb_get(
         "memories",
-        f"memory_layer=eq.long_term&order=id.desc&limit={limit}&select=content,category",
+        f"memory_layer=eq.long_term&order=id.desc&limit={limit}&select=content",
     )
  
  
@@ -915,11 +859,9 @@ def run_nightly_summary(target_date=None):
     run_activity_day_summary(target_date=process_date)
  
     if next_day.weekday() == 0:
-        log.info("📅 跑周总结（persona反思已禁用——persona由克老师本人手动维护，不允许deepseek自动覆盖）")
+        log.info("📅 跑周总结")
         run_chat_week_summary(target_sunday=process_date)
-        # run_persona_reflection()  # 2026-07-30 禁用：此函数用后台deepseek重写并PATCH覆盖persona_profile，
-        # 会覆盖克老师亲手写的版本。克老师的记忆/人格必须由他自己管（天天底线），任何模型不得自动改写。
-        # 如需恢复，应先改成"只生成建议写日志、不覆盖"的模式。
+        # persona_reflection 已于 2026-07-31 整体移除（克老师拍板：人格不靠定时任务维护）
  
     if next_day.day == 1:
         log.info("📅 跑月总结")
@@ -940,14 +882,15 @@ def build_free_activity_context() -> tuple[str, str]:
     activity_sums = _sb_get("activity_summaries", "period=eq.day&order=period_end.desc&limit=3")
     device_latest = _sb_get("device_data", "device_event=is.null&order=created_at.desc&limit=3")
     screen_latest = _sb_get("device_data", "device_event=not.is.null&order=created_at.desc&limit=1")
+    # memories 表已弃用（OB 接管记忆层），保留查询但只查真实存在的列，避免 400 红字
     core_rows = _sb_get("memories",
-        "select=content,category,importance,memory_layer,tags&memory_layer=eq.core&order=importance.desc&limit=10")
+        "select=content,importance,memory_layer&memory_layer=eq.core&order=importance.desc&limit=10")
     current_rows = _sb_get("memories",
-        "select=content,category,importance,memory_layer,tags&memory_layer=eq.current&order=importance.desc&limit=3")
+        "select=content,importance,memory_layer&memory_layer=eq.current&order=importance.desc&limit=3")
     longterm_rows = _sb_get("memories",
-        "select=content,category,importance,memory_layer,tags&memory_layer=eq.long_term&order=importance.desc&limit=3")
+        "select=content,importance,memory_layer&memory_layer=eq.long_term&order=importance.desc&limit=3")
     memory_rows = core_rows + current_rows + longterm_rows
-    persona_rows = _sb_get("persona_profile", "select=category,key,content&order=category.asc")
+    persona_rows = _sb_get("persona_profile", "select=content&order=id.asc")
  
     chat_text = chat_sums[0]["content"] if chat_sums else "（暂无对话总结）"
     if activity_sums:
@@ -1119,12 +1062,9 @@ def build_free_activity_context() -> tuple[str, str]:
         tag_str = f" ({', '.join(m['tags'])})" if m.get("tags") else ""
         mem_lines.append(f"- [{m.get('memory_layer')}|重要度{m.get('importance')}]{tag_str} {m.get('content')}")
     memories_text = "\n".join(mem_lines) or "（暂无记忆）"
- 
-    grouped: dict = {}
-    for row in persona_rows:
-        cat = row.get("category", "other")
-        grouped.setdefault(cat, []).append(f"  [{row.get('key')}] {row.get('content')}")
-    persona_text = "\n".join(f"[{cat}]\n" + "\n".join(items) for cat, items in grouped.items()) or "（暂无）"
+
+    # persona_profile 表只有 id/content/created_at（无 category/key），按 id 顺序拼接
+    persona_text = "\n".join(row.get("content", "") for row in persona_rows) or "（暂无）"
  
     system = prompts.FREE_ACTIVITY_SYSTEM.format(current_time=current_time)
     user = prompts.FREE_ACTIVITY_CONTEXT.format(
