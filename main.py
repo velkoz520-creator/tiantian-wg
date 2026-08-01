@@ -351,7 +351,14 @@ class RikkahubGatewayMiddleware:
                     # 被重复入库，历史和 Mem0 越滚越大、context 越来越慢。
                     last_msg_role = original_messages[-1].get("role", "") if original_messages else ""
  
-                    system_prompt = await asyncio.to_thread(build_rikkahub_context)
+                    # 先检测是否主动消息（决定用精简版还是完整版 context）
+                    _is_proactive = False
+                    if original_messages and original_messages[0].get("role") == "system":
+                        existing_system = original_messages[0].get("content", "")
+                        _is_proactive = "[主动消息上下文]" in existing_system
+
+                    # 主动消息用 lean=True（精简注入，避免独白体淹没主动指令）
+                    system_prompt = await asyncio.to_thread(build_rikkahub_context, True, _is_proactive)
                     # v2 第一批第1条：橘瓣端平台与能力感知（仅橘瓣，TG 走 build_bot_context 不经过这里）
                     system_prompt = RIKKAHUB_PLATFORM_AWARENESS + "\n\n" + system_prompt
 
@@ -362,16 +369,13 @@ class RikkahubGatewayMiddleware:
                         mem0_ctx = await asyncio.to_thread(search_mem0_context, user_text, 3)
                         if mem0_ctx:
                             system_prompt += "\n\n" + mem0_ctx
- 
+
                     if original_messages and original_messages[0].get("role") == "system":
                         existing_system = original_messages[0].get("content", "")
-                        # 橘瓣主动消息修复：检测到[主动消息上下文]标记时，不覆盖橘瓣的原 system
-                        # （原 system 含主动消息指令：定时/设备事件触发、[PASS]不发机制等）
-                        # 改为保留橘瓣指令 + 追加网关人格，让两者共存。
-                        # 之前无脑覆盖会导致克老师认不出主动消息任务 → 重复回复/行为错乱。
-                        if "[主动消息上下文]" in existing_system:
-                            original_messages[0]["content"] = existing_system + "\n\n" + system_prompt
-                            log.info("[Gateway] 检测到橘瓣主动消息，已保留原system指令+追加人格")
+                        if _is_proactive:
+                            # 主动消息：网关人格在前，橘瓣主动指令在后（A方案，让克老师最后读到主动任务）
+                            original_messages[0]["content"] = system_prompt + "\n\n" + existing_system
+                            log.info("[Gateway] 检测到橘瓣主动消息，精简注入+主动指令置后")
                         else:
                             original_messages[0]["content"] = system_prompt
                     else:
@@ -577,6 +581,7 @@ class RikkahubGatewayMiddleware:
                     _is_system = (
                         _stripped.startswith(f"你是{AI_NAME}")
                         or _stripped.startswith("[主动消息上下文]")
+                        or _is_proactive  # 主动消息回复不存 chat_messages，防复读死循环
                     )
                     # user 消息只在"消息列表以 user 结尾"（真正的新用户输入）的那次
                     # 请求存一次；工具往返的后续请求（以 role=tool 结尾）里的

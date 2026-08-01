@@ -961,7 +961,7 @@ def _get_gmail_unread() -> str:
         return ""
 
 
-def build_rikkahub_context(include_wx_cross: bool = True) -> str:
+def build_rikkahub_context(include_wx_cross: bool = True, lean: bool = False) -> str:
     now_ts = time.time()
     cached = _rikkahub_ctx_cache.get(include_wx_cross)
     if cached and now_ts - cached[0] < _RIKKAHUB_CTX_TTL:
@@ -1008,29 +1008,43 @@ def build_rikkahub_context(include_wx_cross: bool = True) -> str:
     parts = []
     if persona_rows:
         parts.append(persona_rows[0]["content"])
-    mem_labels = [
-        (core_rows, "核心记忆"),
-        (current_rows, f"{PARTNER_NAME}近期状态"),
-        (longterm_rows, "长期记忆"),
-    ]
-    for rows, label in mem_labels:
-        if rows:
-            parts.append(f"【{label}】\n" + "\n".join(f"- {r['content']}" for r in rows))
-    if summary_rows:
-        s_parts = []
-        for r in summary_rows:
+
+    # lean 模式（主动消息用）：跳过三份日记（activity_log/secret_diary/activity_summaries），
+    # 只保留人格 + 日总结(最近1条) + 跨平台动向。避免独白体淹没主动消息指令。
+    if not lean:
+        mem_labels = [
+            (core_rows, "核心记忆"),
+            (current_rows, f"{PARTNER_NAME}近期状态"),
+            (longterm_rows, "长期记忆"),
+        ]
+        for rows, label in mem_labels:
+            if rows:
+                parts.append(f"【{label}】\n" + "\n".join(f"- {r['content']}" for r in rows))
+        if summary_rows:
+            s_parts = []
+            for r in summary_rows:
+                period = (r.get("period") or "").strip()
+                ps     = (r.get("period_start") or "")[:10]
+                pe     = (r.get("period_end") or "")[:10]
+                header = f"[{period}]" if period else f"[{ps} ~ {pe}]"
+                s_parts.append(f"{header}\n{r['content']}")
+            parts.append("【历史对话摘要（以【当前时间】为准）】\n" + "\n\n".join(s_parts))
+        if act_sum_text:
+            parts.append(act_sum_text)
+        if activity_text:
+            parts.append(activity_text)
+        if diary_text:
+            parts.append(diary_text)
+    else:
+        # 精简模式：只留最近1条日总结（够他知道最近发生了什么，不至于太长淹没指令）
+        if summary_rows:
+            r = summary_rows[0]
             period = (r.get("period") or "").strip()
             ps     = (r.get("period_start") or "")[:10]
             pe     = (r.get("period_end") or "")[:10]
             header = f"[{period}]" if period else f"[{ps} ~ {pe}]"
-            s_parts.append(f"{header}\n{r['content']}")
-        parts.append("【历史对话摘要（以【当前时间】为准）】\n" + "\n\n".join(s_parts))
-    if act_sum_text:
-        parts.append(act_sum_text)
-    if activity_text:
-        parts.append(activity_text)
-    if diary_text:
-        parts.append(diary_text)
+            parts.append(f"【最近对话摘要】\n{header}\n{r['content']}")
+
     if platform_text:
         parts.append(platform_text)
 
