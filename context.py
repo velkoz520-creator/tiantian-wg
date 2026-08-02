@@ -839,6 +839,46 @@ def write_reminder(trigger_at: str, message: str, repeat_type: str = "once") -> 
         return False
 
 
+def _get_tg_recent_messages(sb, limit: int = 15, hours: int = 12) -> str:
+    """取 TG 私聊最近 N 条原文（排除橘瓣的 [rikkahub] 前缀消息），带时间窗口。
+
+    用途：注入橘瓣端 system，让橘瓣克老师能看到 TG 那边最近聊了什么，
+    解决"TG切回橘瓣记忆不足"的问题。橘瓣 APP 自己的 messages 只带当前窗口
+    历史，看不到 TG 的——这个函数补上那条缺失的通路。
+
+    排除 [rikkahub] 前缀：橘瓣对话走 save_chat_message 存进 type=message
+    但带 [rikkahub] 前缀，TG 私聊不带前缀，用 not.like 过滤。
+    """
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        rows = _sb_exec(lambda: (
+            sb.table("chat_context")
+            .select("role,content,created_at")
+            .eq("type", "message")
+            .not_("like", "content", "[rikkahub]%")
+            .gte("created_at", cutoff)
+            .order("seq", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+        ), label="_get_tg_recent_messages")
+    except Exception as e:
+        log.error(f"[_get_tg_recent_messages] 读取TG最近对话失败: {e}", exc_info=True)
+        return ""
+    if not rows:
+        return ""
+
+    rows.reverse()  # 改为时间正序（老→新），读起来更自然
+    lines = []
+    for r in rows:
+        role = AI_NAME if r.get("role") == "assistant" else PARTNER_NAME
+        content = (r.get("content") or "").strip()
+        if len(content) > 300:
+            content = content[:300] + "…"
+        lines.append(f"{role}: {content}")
+    return "【TG 最近对话（你不在的时候她在TG跟你说了这些）】\n" + "\n".join(lines)
+
+
 def _get_activity_log(sb) -> str:
     try:
         rows = _sb_exec(lambda: (
@@ -994,6 +1034,7 @@ def build_rikkahub_context(include_wx_cross: bool = True, lean: bool = False) ->
         f_act_sum      = pool.submit(lambda: _get_activity_summaries(sb))
         f_diary        = pool.submit(lambda: _get_secret_diary(sb))
         f_platform     = pool.submit(_get_platform_rolling_summary)
+        f_tg_recent    = pool.submit(lambda: _get_tg_recent_messages(sb, 10 if lean else 15))
 
         persona_rows    = f_persona.result()
         core_rows       = f_core.result()
@@ -1003,6 +1044,7 @@ def build_rikkahub_context(include_wx_cross: bool = True, lean: bool = False) ->
         activity_text   = f_activity.result()
         act_sum_text    = f_act_sum.result()
         diary_text      = f_diary.result()
+        tg_recent_text  = f_tg_recent.result()
         platform_text   = f_platform.result()
 
     parts = []
@@ -1047,6 +1089,8 @@ def build_rikkahub_context(include_wx_cross: bool = True, lean: bool = False) ->
 
     if platform_text:
         parts.append(platform_text)
+    if tg_recent_text:
+        parts.append(tg_recent_text)
 
     group_cross = _get_group_cross_context(20)
     wx_cross_here = _get_wx_cross_context(20) if include_wx_cross else ""
@@ -1059,18 +1103,9 @@ def build_rikkahub_context(include_wx_cross: bool = True, lean: bool = False) ->
               "前后割裂。"
         )
 
-    rikkahub_recent = list(_rikkahub_cache)[-30:]
-    if rikkahub_recent:
-        lines = []
-        for m in rikkahub_recent:
-            content = m["content"]
-            if len(content) > 300:
-                content = content[:300] + "…"
-            if m["role"] == "assistant":
-                lines.append(f"{AI_NAME}: {content}")
-            else:
-                lines.append(content)
-        parts.append("【近期APP互动记录（rikkahub）】\n" + "\n".join(lines))
+    # 原 _rikkahub_cache 注入已移除（2026-08-02）：
+    # 橘瓣 APP 的 messages 已带当前窗口完整历史，system 里再注入一份是重复。
+    # 改为注入 TG 最近对话（_get_tg_recent_messages），补上橘瓣看不到 TG 的缺口。
 
     result = "\n\n".join(parts)
     _rikkahub_ctx_cache[include_wx_cross] = (now_ts, result)
