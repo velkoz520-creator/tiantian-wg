@@ -259,6 +259,7 @@ async def _group_reply(chat_id: str, delay_range: tuple[int, int] = (10, 15)):
         messages = [{"role": "system", "content": system_prompt}] + history
  
         final_reply = ""
+        _written_hashes = set()  # 防止克老师跨轮重复写同一条日记
         for _ in range(3):
             content, tool_calls = await call_llm(
                 messages, max_tokens=300, tools=GROUP_TOOL_SCHEMAS,
@@ -281,8 +282,15 @@ async def _group_reply(chat_id: str, delay_range: tuple[int, int] = (10, 15)):
                 except json.JSONDecodeError:
                     fn_args = {}
                 if fn_name == "secret_diary":
-                    print("🔒 [群聊] 偷写日记...")
-                    tool_result = await asyncio.to_thread(execute_diary_tool, fn_args)
+                    _diary_text = (fn_args.get("content") or "").strip()
+                    _h = hash(_diary_text)
+                    if _h in _written_hashes:
+                        print("🔒 [群聊] 跳过重复日记")
+                        tool_result = "✅ 刚才已经写过了，不用重复写。"
+                    else:
+                        _written_hashes.add(_h)
+                        print("🔒 [群聊] 偷写日记...")
+                        tool_result = await asyncio.to_thread(execute_diary_tool, fn_args)
                 else:
                     tool_result = f"未知工具: {fn_name}"
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(tool_result)})
@@ -342,6 +350,7 @@ async def _delayed_private_reply():
         final_reply = ""
  
         try:
+            _written_hashes = set()
             for _ in range(6):
                 content, tool_calls = await call_llm(messages, tools=tools)
                 if not tool_calls:
@@ -359,8 +368,15 @@ async def _delayed_private_reply():
                     except json.JSONDecodeError:
                         fn_args = {}
                     if fn_name == "secret_diary":
-                        print("🔒 偷写日记...")
-                        result = await asyncio.to_thread(execute_diary_tool, fn_args)
+                        _diary_text = (fn_args.get("content") or "").strip()
+                        _h = hash(_diary_text)
+                        if _h in _written_hashes:
+                            print("🔒 跳过重复日记")
+                            result = "✅ 刚才已经写过了，不用重复写。"
+                        else:
+                            _written_hashes.add(_h)
+                            print("🔒 偷写日记...")
+                            result = await asyncio.to_thread(execute_diary_tool, fn_args)
                     else:
                         result = f"未知工具: {fn_name}"
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(result)})
@@ -551,6 +567,7 @@ async def handle_telegram_update(update: dict):
         final_reply = ""
  
         try:
+            _written_hashes = set()
             for _ in range(6):
                 content, tool_calls = await call_llm(messages, tools=tools)
  
@@ -572,8 +589,15 @@ async def handle_telegram_update(update: dict):
                         fn_args = {}
  
                     if fn_name == "secret_diary":
-                        print("🔒 偷写日记...")
-                        result = await asyncio.to_thread(execute_diary_tool, fn_args)
+                        _diary_text = (fn_args.get("content") or "").strip()
+                        _h = hash(_diary_text)
+                        if _h in _written_hashes:
+                            print("🔒 跳过重复日记")
+                            result = "✅ 刚才已经写过了，不用重复写。"
+                        else:
+                            _written_hashes.add(_h)
+                            print("🔒 偷写日记...")
+                            result = await asyncio.to_thread(execute_diary_tool, fn_args)
                     else:
                         result = f"未知工具: {fn_name}"
  
