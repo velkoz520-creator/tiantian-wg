@@ -855,7 +855,7 @@ def _get_tg_recent_messages(sb, limit: int = 15, hours: int = 12) -> str:
             sb.table("chat_context")
             .select("role,content,created_at")
             .eq("type", "message")
-            .not_("like", "content", "[rikkahub]%")
+            .not_.like("content", "[rikkahub]%")
             .gte("created_at", cutoff)
             .order("seq", desc=True)
             .limit(limit)
